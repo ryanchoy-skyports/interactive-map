@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mapbox 3D Globe — Continent & Country Selector</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #app { height: 100%; display: grid; grid-template-rows: auto 1fr auto; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    header { padding: 10px 14px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    header h1 { margin: 0; font-size: 16px; }
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; border: 1px solid #ddd; cursor: pointer; font-size: 12px; background: #fff; }
+    .pill:hover { background: #f6f6f6; }
+    .pill.active { background: #111; color: #fff; border-color: #111; }
+    #map { width: 100%; height: 100vh; }
+    .sidebar { position: absolute; left: 12px; top: 70px; z-index: 5; background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.08); max-width: 280px; }
+    .sidebar h3 { margin: 0 0 6px 0; font-size: 14px; }
+    .sidebar .row { font-size: 13px; margin-top: 4px; }
+    .sidebar button { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; font-size: 13px; }
+    .sidebar button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .footer { padding: 8px 14px; border-top: 1px solid #eee; font-size: 12px; color: #666; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  </style>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Mapbox 3D Globe — Select Continent, Hover & Click Country</h1>
+      <div class="controls" id="controls">
+        <span style="font-size:12px;color:#666;">Quick zoom:</span>
+        <div class="pill" data-continent="world">World</div>
+        <div class="pill" data-continent="africa">Africa</div>
+        <div class="pill" data-continent="asia">Asia</div>
+        <div class="pill" data-continent="europe">Europe</div>
+        <div class="pill" data-continent="na">North America</div>
+        <div class="pill" data-continent="sa">South America</div>
+        <div class="pill" data-continent="oceania">Oceania</div>
+        <div class="pill" data-continent="antarctica">Antarctica</div>
+      </div>
+    </header>
+    <div style="position: relative;">
+      <div id="map"></div>
+      <div class="sidebar">
+        <h3>Selection</h3>
+        <div class="row">Continent: <strong id="sel-continent">—</strong></div>
+        <div class="row">Country: <strong id="sel-country">—</strong></div>
+        <button id="continueBtn" disabled>Continue</button>
+        <div class="row" style="margin-top:6px;font-size:12px;color:#666;">Set <code>TYPEFORM_BASE_URL</code> in the script to redirect with hidden fields.</div>
+      </div>
+    </div>
+    <div class="footer">
+      <span>Drag to rotate globe • Pinch/scroll to zoom • Two-finger drag to tilt.</span>
+    </div>
+  </div>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+  <script>
+    // ==== REQUIRED: Insert your Mapbox token below ====
+    mapboxgl.accessToken = "YOUR_MAPBOX_ACCESS_TOKEN_HERE";
+
+    // ==== Optional: Typeform redirect ====
+    const TYPEFORM_BASE_URL = ""; // e.g., "https://form.typeform.com/to/YourFormID"
+    const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
+
+    const map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/light-v11',
+      center: [0, 20],
+      zoom: 1.5,
+      pitch: 45,
+      bearing: 0,
+      projection: 'globe',
+      cooperativeGestures: true
+    });
+
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
+
+    const CONTINENTS = {
+      africa:      { name: "Africa",      center: [20, 8],    zoom: 2.6 },
+      asia:        { name: "Asia",        center: [90, 30],   zoom: 2.0 },
+      europe:      { name: "Europe",      center: [15, 50],   zoom: 3.0 },
+      na:          { name: "North America", center: [-100, 40], zoom: 2.2 },
+      sa:          { name: "South America", center: [-60, -15], zoom: 2.6 },
+      oceania:     { name: "Oceania",     center: [140, -20], zoom: 2.4 },
+      antarctica:  { name: "Antarctica",  center: [0, -80],   zoom: 1.6 },
+      world:       { name: "World",       center: [0, 20],    zoom: 1.5 }
+    };
+
+    let activeContinentKey = 'world';
+    let selectedCountry = null;
+    let hoveredId = null;
+
+    document.getElementById('controls').addEventListener('click', (e) => {
+      const pill = e.target.closest('.pill');
+      if (!pill) return;
+      const key = pill.getAttribute('data-continent');
+      if (!key || !CONTINENTS[key]) return;
+      flyToContinent(key);
+    });
+
+    function flyToContinent(key) {
+      const c = CONTINENTS[key];
+      activeContinentKey = key;
+      document.getElementById('sel-continent').textContent = c.name;
+      map.flyTo({ center: c.center, zoom: c.zoom, essential: true, pitch: 45, bearing: 0 });
+      applyActivePill();
+      selectedCountry = null;
+      document.getElementById('sel-country').textContent = '—';
+      document.getElementById('continueBtn').disabled = true;
+      filterCountriesByContinent();
+    }
+
+    function applyActivePill() {
+      document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+      const active = document.querySelector(`.pill[data-continent="${activeContinentKey}"]`);
+      if (active) active.classList.add('active');
+    }
+
+    const WORLD_GEOJSON_URL = "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson";
+
+    map.on('load', async () => {
+      // Atmosphere on globe
+      try { map.setFog({}); } catch (_) {}
+
+      const res = await fetch(WORLD_GEOJSON_URL, { mode: 'cors' });
+      const world = await res.json();
+
+      world.features.forEach(f => {
+        const name = f.properties.name || f.properties.ADMIN || "Unknown";
+        const centroid = turf.centroid(f).geometry.coordinates;
+        f.properties._name = name;
+        f.properties._centroid = centroid;
+        f.properties._continent = inferContinent(centroid);
+      });
+
+      map.addSource('countries', { type: 'geojson', data: world, generateId: true });
+
+      map.addLayer({
+        id: 'countries-fill',
+        type: 'fill',
+        source: 'countries',
+        paint: {
+          'fill-color': '#9ec5fe',
+          'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.75, 0.45]
+        }
+      });
+
+      map.addLayer({
+        id: 'countries-outline',
+        type: 'line',
+        source: 'countries',
+        paint: { 'line-color': '#4b5563', 'line-width': 0.6 }
+      });
+
+      map.on('mousemove', 'countries-fill', (e) => {
+        map.getCanvas().style.cursor = 'pointer';
+        if (!e.features.length) return;
+        const fid = e.features[0].id;
+        if (hoveredId !== null) map.setFeatureState({ source: 'countries', id: hoveredId }, { hover: false });
+        hoveredId = fid;
+        map.setFeatureState({ source: 'countries', id: hoveredId }, { hover: true });
+      });
+
+      map.on('mouseleave', 'countries-fill', () => {
+        map.getCanvas().style.cursor = '';
+        if (hoveredId !== null) map.setFeatureState({ source: 'countries', id: hoveredId }, { hover: false });
+        hoveredId = null;
+      });
+
+      map.on('click', 'countries-fill', (e) => {
+        if (!e.features.length) return;
+        const f = e.features[0];
+        const name = f.properties._name || f.properties.name;
+        selectedCountry = name;
+        document.getElementById('sel-country').textContent = name;
+        document.getElementById('continueBtn').disabled = false;
+
+        const bbox = turf.bbox(f);
+        map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 40, pitch: 45 });
+      });
+
+      flyToContinent('world');
+    });
+
+    function inferContinent([lng, lat]) {
+      const boxes = {
+        africa: [[-35, -20], [38, 52]],
+        asia: [[0, 26], [80, 180]],
+        europe: [[35, -25], [72, 45]],
+        na: [[7, -168], [83, -52]],
+        sa: [[-56, -82], [13, -34]],
+        oceania: [[-50, 110], [0, 180]],
+        antarctica: [[-90, -180], [-60, 180]]
+      };
+      for (const [k, b] of Object.entries(boxes)) {
+        const [[sLat, sLng], [nLat, nLng]] = b;
+        if (lat >= sLat && lat <= nLat && lng >= sLng && lng <= nLng) return k;
+      }
+      return 'world';
+    }
+
+    document.getElementById('continueBtn').addEventListener('click', () => {
+      if (!selectedCountry) return;
+      const continent = CONTINENTS[activeContinentKey].name;
+      const country = selectedCountry;
+      if (TYPEFORM_BASE_URL) {
+        const params = new URLSearchParams();
+        params.set(HIDDEN_FIELD_NAMES.country, country);
+        params.set(HIDDEN_FIELD_NAMES.continent, continent);
+        const url = TYPEFORM_BASE_URL + (TYPEFORM_BASE_URL.includes('?') ? '&' : '?') + params.toString();
+        window.location.href = url;
+      } else {
+        alert(`Selected: ${country} (${continent}). Set TYPEFORM_BASE_URL to auto-redirect.`);
+      }
+    });
+
+    window.addEventListener('resize', () => map.resize());
+  </script>
+</body>
+</html>
