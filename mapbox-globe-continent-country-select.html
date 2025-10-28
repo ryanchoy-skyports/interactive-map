@@ -10,7 +10,7 @@
     header { padding: 10px 14px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
     header h1 { margin: 0; font-size: 16px; }
     .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; border: 1px solid #ddd; cursor: pointer; font-size: 12px; background: #fff; }
+    .pill { display: inline-block; padding: 8px 14px; border-radius: 999px; border: 1px solid #ddd; cursor: pointer; font-size: 14px; background: #fff; }
     .pill:hover { background: #f6f6f6; }
     .pill.active { background: #111; color: #fff; border-color: #111; }
     #map { width: 100%; height: 100vh; }
@@ -26,7 +26,7 @@
 <body>
   <div id="app">
     <header>
-      <h1>Mapbox 3D Globe — Select Continent, Hover & Click Country</h1>
+      <h1>🌏 Where are you from?</h1>
       <div class="controls" id="controls">
         <span style="font-size:12px;color:#666;">Quick zoom:</span>
         <div class="pill" data-continent="world">World</div>
@@ -46,7 +46,7 @@
         <div class="row">Continent: <strong id="sel-continent">—</strong></div>
         <div class="row">Country: <strong id="sel-country">—</strong></div>
         <button id="continueBtn" disabled>Continue</button>
-        <div class="row" style="margin-top:6px;font-size:12px;color:#666;">Set <code>TYPEFORM_BASE_URL</code> in the script to redirect with hidden fields.</div>
+        <div class="row" style="margin-top:6px;font-size:12px;color:#666;">2 more survey questions :)</div>
       </div>
     </div>
     <div class="footer">
@@ -66,7 +66,7 @@
 
     const map = new mapboxgl.Map({
       container: 'map',
-      style: 'mapbox://styles/mapbox/light-v11',
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
       center: [0, 20],
       zoom: 1.5,
       pitch: 45,
