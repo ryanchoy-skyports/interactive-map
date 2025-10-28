@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive World → Continent → Country Selector (No Token)</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha512-p3bZ8H1wjrA9V3e2PjZ8YvHqQK9nqj8ZkZgV2jQWZ0wQ8s5QKZcR+M1qJxqjLxk8Kk5QyF7rV5a4bS+nE1l5rQ=="
+    crossorigin=""
+  />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #app { height: 100%; display: grid; grid-template-rows: auto 1fr auto; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    header { padding: 10px 14px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    header h1 { margin: 0; font-size: 18px; }
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .pill { display: inline-block; margin: 0; padding: 6px 10px; border-radius: 999px; border: 1px solid #ddd; cursor: pointer; font-size: 12px; background: #fff; }
+    .pill:hover { background: #f6f6f6; }
+    .pill.active { background: #111; color: #fff; border-color: #111; }
+    #map { width: 100%; height: 100%; }
+    .sidebar { position: absolute; left: 12px; top: 70px; z-index: 500; background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.08); max-width: 280px; }
+    .sidebar h3 { margin: 0 0 6px 0; font-size: 14px; }
+    .sidebar .row { font-size: 13px; margin-top: 4px; }
+    .sidebar button { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid #111; background: #111; color: #fff; cursor: pointer; font-size: 13px; }
+    .sidebar button:hover { filter: brightness(1.05); }
+    .leaflet-container { background: #eef2f7; }
+    .leaflet-popup-content { font-size: 13px; }
+    .footer { padding: 8px 14px; border-top: 1px solid #eee; font-size: 12px; color: #666; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .tip { font-size: 12px; color: #666; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Interactive World Map — Select Continent, Hover & Click Country</h1>
+      <div class="controls" id="controls">
+        <span class="tip">Quick zoom:</span>
+        <div class="pill" data-continent="world">World</div>
+        <div class="pill" data-continent="africa">Africa</div>
+        <div class="pill" data-continent="asia">Asia</div>
+        <div class="pill" data-continent="europe">Europe</div>
+        <div class="pill" data-continent="na">North America</div>
+        <div class="pill" data-continent="sa">South America</div>
+        <div class="pill" data-continent="oceania">Oceania</div>
+        <div class="pill" data-continent="antarctica">Antarctica</div>
+      </div>
+    </header>
+    <div style="position: relative;">
+      <div id="map"></div>
+      <div class="sidebar" id="sidebar">
+        <h3>Selection</h3>
+        <div class="row">Continent: <strong id="sel-continent">—</strong></div>
+        <div class="row">Country: <strong id="sel-country">—</strong></div>
+        <button id="continueBtn" disabled>Continue</button>
+        <div class="tip" style="margin-top:6px;">Tip: set <code>TYPEFORM_BASE_URL</code> to redirect with hidden fields.</div>
+      </div>
+    </div>
+    <div class="footer">
+      <span><strong>Embed:</strong> Host this file via HTTPS and add to Typeform as a <em>Website</em> question (“Open in the form”).</span>
+      <span>Hover = highlight; Click = select. Zoom pills focus by continent; countries are filtered by centroid.</span>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha512-6h8fIHTdJ7zZcBqk1V3EhxHTz3xw3iK9wNLoHqS/tU9kq+2qYyQk9qT6w2m0Gx4w0v2uXbV+qP7c0yn3Y5jT2Q==" crossorigin=""></script>
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-fetch@3/dist/d3-fetch.min.js"></script>
+
+  <script>
+    // ==== CONFIG ====
+    // If you want to redirect to Typeform with hidden fields after a selection,
+    // set TYPEFORM_BASE_URL to your live form URL, e.g.:
+    // const TYPEFORM_BASE_URL = "https://form.typeform.com/to/ABC123";
+    const TYPEFORM_BASE_URL = ""; // leave blank to disable redirect
+    const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
+
+    // Continents bounds (approximate) for zoom and filtering (centroid-in-bounds)
+    const CONTINENTS = {
+      africa:      { name: "Africa",      bounds: [[-35, -20], [38, 52]] },
+      asia:        { name: "Asia",        bounds: [[0, 26], [80, 180]] },
+      europe:      { name: "Europe",      bounds: [[35, -25], [72, 45]] },
+      na:          { name: "North America", bounds: [[7, -168], [83, -52]] },
+      sa:          { name: "South America", bounds: [[-56, -82], [13, -34]] },
+      oceania:     { name: "Oceania",     bounds: [[-50, 110], [0, 180]] },
+      antarctica:  { name: "Antarctica",  bounds: [[-90, -180], [-60, 180]] },
+      world:       { name: "World",       bounds: [[-60, -180], [80, 180]] },
+    };
+
+    // Set up map
+    const map = L.map('map', { worldCopyJump: true }).setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 7,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // State
+    let activeContinentKey = "world";
+    let geojsonLayer = null;
+    let countryIndex = []; // [{name, feature, centroidLngLat:[lng,lat]}]
+    let selectedCountry = null;
+
+    // Load countries GeoJSON (includes polygon geometries)
+    // Source: simple world geojson (Holtzy gallery)
+    const WORLD_GEOJSON_URL = "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson";
+
+    d3.json(WORLD_GEOJSON_URL).then(data => {
+      // Build index with centroids
+      countryIndex = data.features.map(f => {
+        const name = f.properties.name || f.properties.ADMIN || "Unknown";
+        const centroid = turf.centroid(f);
+        const [lng, lat] = centroid.geometry.coordinates;
+        return { name, feature: f, centroidLngLat: [lng, lat] };
+      });
+
+      renderCountries();
+      applyActivePill();
+    }).catch(err => {
+      console.error("Failed to load world.geojson", err);
+      alert("Failed to load world map data. Please check your network or CDN access.");
+    });
+
+    function isInActiveContinent(centroid) {
+      if (activeContinentKey === "world") return true;
+      const b = CONTINENTS[activeContinentKey].bounds;
+      const lat = centroid[1], lng = centroid[0];
+      return lat >= b[0][0] && lat <= b[1][0] && lng >= b[0][1] && lng <= b[1][1];
+    }
+
+    function renderCountries() {
+      if (geojsonLayer) {
+        geojsonLayer.remove();
+        geojsonLayer = null;
+      }
+
+      const filtered = {
+        type: "FeatureCollection",
+        features: countryIndex
+          .filter(c => isInActiveContinent(c.centroidLngLat))
+          .map(c => c.feature)
+      };
+
+      function style(feature) {
+        return {
+          weight: 0.6,
+          color: "#666",
+          fillColor: "#bcd3ff",
+          fillOpacity: 0.45
+        };
+      }
+
+      function highlight(e) {
+        const layer = e.target;
+        layer.setStyle({ weight: 1.5, color: "#111", fillOpacity: 0.65 });
+        layer.bringToFront();
+      }
+
+      function reset(e) {
+        geojsonLayer.resetStyle(e.target);
+      }
+
+      function onEachFeature(feature, layer) {
+        const name = feature.properties.name || feature.properties.ADMIN || "Unknown";
+        layer.on({
+          mouseover: highlight,
+          mouseout: reset,
+          click: () => selectCountry(name, feature, layer)
+        });
+        layer.bindTooltip(name, { sticky: true, direction: "auto", opacity: 0.9 });
+      }
+
+      geojsonLayer = L.geoJSON(filtered, { style, onEachFeature }).addTo(map);
+    }
+
+    function selectCountry(name, feature, layer) {
+      selectedCountry = name;
+      document.getElementById("sel-country").textContent = name;
+      document.getElementById("continueBtn").disabled = false;
+
+      const bounds = layer.getBounds();
+      map.fitBounds(bounds, { padding: [20, 20] });
+
+      // Popup with "Select" action
+      const content = `<div><strong>${name}</strong><br/>
+        <button id="popupSelectBtn" style="margin-top:6px;padding:6px 8px;border-radius:8px;border:1px solid #111;background:#111;color:#fff;cursor:pointer;">Use this country</button>
+      </div>`;
+      layer.bindPopup(content).openPopup();
+
+      setTimeout(() => {
+        const btn = document.getElementById("popupSelectBtn");
+        if (btn) btn.onclick = () => continueFlow();
+      }, 0);
+    }
+
+    // Zoom controls
+    document.getElementById("controls").addEventListener("click", (e) => {
+      const pill = e.target.closest(".pill");
+      if (!pill) return;
+      const key = pill.getAttribute("data-continent");
+      if (!key || !CONTINENTS[key]) return;
+
+      activeContinentKey = key;
+      document.getElementById("sel-continent").textContent = CONTINENTS[key].name;
+      renderCountries();
+      map.fitBounds(CONTINENTS[key].bounds, { padding: [20, 20] });
+      applyActivePill();
+      // Reset selection when changing continent
+      selectedCountry = null;
+      document.getElementById("sel-country").textContent = "—";
+      document.getElementById("continueBtn").disabled = true;
+    });
+
+    function applyActivePill() {
+      document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+      const active = document.querySelector(`.pill[data-continent="${activeContinentKey}"]`);
+      if (active) active.classList.add("active");
+      document.getElementById("sel-continent").textContent = CONTINENTS[activeContinentKey].name;
+    }
+
+    // Continue flow: redirect to Typeform with hidden fields, or postMessage
+    document.getElementById("continueBtn").addEventListener("click", continueFlow);
+
+    function continueFlow() {
+      if (!selectedCountry) return;
+      const continent = CONTINENTS[activeContinentKey].name;
+      const country = selectedCountry;
+
+      // Prefer redirect with hidden fields if Typeform URL is set
+      if (TYPEFORM_BASE_URL) {
+        const params = new URLSearchParams();
+        params.set(HIDDEN_FIELD_NAMES.country, country);
+        params.set(HIDDEN_FIELD_NAMES.continent, continent);
+        const url = TYPEFORM_BASE_URL + (TYPEFORM_BASE_URL.includes("?") ? "&" : "?") + params.toString();
+        window.location.href = url;
+        return;
+      }
+
+      // If not redirecting, attempt to postMessage to parent (Typeform embed can listen)
+      const payload = { type: "map-selection", country, continent };
+      try {
+        window.parent.postMessage(payload, "*");
+        alert(`Selected: ${country} (${continent}).\n\nTip: set TYPEFORM_BASE_URL to auto-redirect with hidden fields.`);
+      } catch (e) {
+        alert(`Selected: ${country} (${continent}).`);
+      }
+    }
+
+    // Initialize
+    map.fitWorld();
+  </script>
+</body>
+</html>
