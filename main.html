@@ -14,12 +14,7 @@
     .pill:hover { background: #f6f6f6; }
     .pill.active { background: #111; color: #fff; border-color: #111; }
 
-    /* Map styling */
-    #map {
-      width: 100%;
-      height: calc(100vh - 92px);
-      min-height: 420px;
-    }
+    #map { width: 100%; height: calc(100vh - 92px); min-height: 420px; }
 
     .sidebar { position: absolute; left: 12px; top: 70px; z-index: 5; background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.08); max-width: 300px; }
     .sidebar h3 { margin: 0 0 6px 0; font-size: 14px; }
@@ -29,30 +24,17 @@
     .sidebar input, .sidebar select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 10px; font-size: 13px; background: #fff; }
     .footer { padding: 8px 14px; border-top: 1px solid #eee; font-size: 12px; color: #666; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 
-    /* === Typeform overlay === */
-    .tf-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.45);
-      display: none; align-items: center; justify-content: center; z-index: 50;
-    }
+    /* Typeform overlay */
+    .tf-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 50; }
     .tf-overlay.show { display: flex; }
-    .tf-card {
-      width: min(900px, 96vw); height: min(700px, 92vh);
-      background: #fff; border-radius: 16px; overflow: hidden;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
-      position: relative;
-    }
-    .tf-close {
-      position: absolute; top: 8px; right: 10px; z-index: 2;
-      border: 0; background: transparent; font-size: 22px; cursor: pointer;
-      line-height: 1;
-    }
-    #tf-container { width: 100%; height: 100%; }
+    .tf-card { width: min(900px,96vw); height: min(700px,92vh); background:#fff; border-radius:16px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.25); position:relative; }
+    .tf-close { position:absolute; top:8px; right:10px; border:0; background:transparent; font-size:22px; cursor:pointer; line-height:1; }
+    #tf-container { width:100%; height:100%; }
   </style>
 
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-  <script src="https://embed.typeform.com/next/embed.js"></script>
 </head>
 <body>
   <div id="app">
@@ -99,7 +81,7 @@
       <span>Drag to rotate globe • Pinch/scroll to zoom • Two-finger drag to tilt.</span>
     </div>
 
-    <!-- === Typeform modal overlay === -->
+    <!-- Typeform modal overlay -->
     <div id="tf-overlay" class="tf-overlay" aria-hidden="true">
       <div class="tf-card">
         <button class="tf-close" id="tf-close" aria-label="Close">✕</button>
@@ -108,15 +90,20 @@
     </div>
   </div>
 
-  <script>
-    const { createWidget } = window.typeformEmbed;
+  <!-- All logic (Mapbox + Typeform) -->
+  <script type="module">
+    // Import Typeform ESM build (bundled) — reliable on GitHub Pages
+    import * as typeformEmbed from "https://esm.sh/@typeform/embed@2?bundle";
+    const { createWidget } = typeformEmbed;
 
+    // Mapbox token
     mapboxgl.accessToken = "pk.eyJ1IjoiaGFubmFoLXNreXBvcnRzIiwiYSI6ImNtaGFnMGc3NzBwMzEya3NoeTd2MHNwdmgifQ.u8MJSsxYzPLesSUPT63C1w";
 
+    // Typeform config
     const TYPEFORM_BASE_URL = "https://form.typeform.com/to/arBzBlTZ";
     const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
 
-    /* ==== Typeform overlay & timeout ==== */
+    /* ==== Typeform overlay & 30s inactivity ==== */
     const TF_TIMEOUT_MS = 30000;
     const tfOverlay = document.getElementById('tf-overlay');
     const tfContainer = document.getElementById('tf-container');
@@ -127,8 +114,8 @@
       const url = new URL(TYPEFORM_BASE_URL);
       url.searchParams.set(HIDDEN_FIELD_NAMES.country, country);
       url.searchParams.set(HIDDEN_FIELD_NAMES.continent, continent);
-      tfContainer.innerHTML = "";
 
+      tfContainer.innerHTML = "";
       createWidget(url.toString(), {
         container: tfContainer,
         onReady: resetTfIdleTimer,
@@ -151,7 +138,7 @@
 
     function resetTfIdleTimer() {
       clearTimeout(tfTimer);
-      tfTimer = setTimeout(() => closeTypeform(), TF_TIMEOUT_MS);
+      tfTimer = setTimeout(closeTypeform, TF_TIMEOUT_MS);
     }
 
     tfCloseBtn.addEventListener('click', closeTypeform);
@@ -172,7 +159,6 @@
     map.on('style.load', () => { try { map.setFog({}); } catch (_) {} map.resize(); });
     map.once('load', () => map.resize());
     window.addEventListener('load', () => map.resize());
-
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
 
     const CONTINENTS = {
