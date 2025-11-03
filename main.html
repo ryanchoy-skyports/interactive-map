@@ -48,14 +48,12 @@
         <div class="row">Continent: <strong id="sel-continent">—</strong></div>
         <div class="row">Country: <strong id="sel-country">—</strong></div>
 
-        <!-- ▼ NEW: dropdown fallback -->
         <div class="row" style="margin-top:10px;">
           <label style="font-size:12px;color:#334155;">If you can’t click your country, pick from list:</label>
           <select id="countrySelect">
             <option value="">— Select country —</option>
           </select>
         </div>
-        <!-- ▼ NEW: text fallback -->
         <div class="row">
           <label style="font-size:12px;color:#334155;">Or type it:</label>
           <input type="text" id="countryInput" placeholder="Start typing your country…" />
@@ -74,19 +72,80 @@
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
   <script>
-    // ==== REQUIRED: Insert your Mapbox token below ====
+    /******** CONFIG ********/
     mapboxgl.accessToken = "pk.eyJ1IjoiaGFubmFoLXNreXBvcnRzIiwiYSI6ImNtaGFnMGc3NzBwMzEya3NoeTd2MHNwdmgifQ.u8MJSsxYzPLesSUPT63C1w";
 
-    // ==== Optional: Typeform redirect ====
+    // Typeform redirect (hidden fields will be appended on Continue)
     const TYPEFORM_BASE_URL = "https://form.typeform.com/to/arBzBlTZ";
     const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
 
+    // Power Automate HTTP trigger URL (writes to SharePoint Excel)
+    const FLOW_URL = ""; // <-- paste your Flow URL
+
+    // OPTIONAL: include extra metadata with each log row
+    const sessionId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+
+    async function logToExcel(payload) {
+      if (!FLOW_URL) return; // no-op until configured
+      try {
+        await fetch(FLOW_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          keepalive: true
+        });
+      } catch (e) {
+        // silent fail (don’t break UX)
+      }
+    }
+
+    function currentSelection() {
+      const continent = document.getElementById('sel-continent').textContent.trim();
+      const countryLine = document.getElementById('sel-country').textContent.trim();
+      const country = (countryLine && countryLine !== '—') ? countryLine : (
+        document.getElementById('countryInput').value.trim() ||
+        document.getElementById('countrySelect').value.trim() || ""
+      );
+      const continentKey = activeContinentKey || 'world';
+      return { continent, continentKey, country };
+    }
+
+    function buildLog(event, inputMethod) {
+      const { continent, continentKey, country } = currentSelection();
+      return {
+        timestamp: new Date().toISOString(),
+        event,                 // "continue" | "timeout"
+        continentKey,
+        continent: continent === '—' ? '' : continent,
+        country,
+        inputMethod: inputMethod || "",
+        sessionId,
+        userAgent: navigator.userAgent || "",
+        referrer: document.referrer || ""
+      };
+    }
+
+    /******** 30s inactivity timer ********/
+    const IDLE_MS = 30000;
+    let idleTimer = null;
+    function resetIdleTimer(inputMethod) {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        const { continent, country } = currentSelection();
+        // Only log if *something* is selected/typed
+        if ((continent && continent !== '—') || country) {
+          logToExcel(buildLog("timeout", inputMethod || ""));
+        }
+      }, IDLE_MS);
+    }
+
+    /******** Map + UI ********/
     const map = new mapboxgl.Map({
       container: 'map',
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
-      center: [0, 30],    // lifted a bit so globe sits higher
+      center: [0, 30],
       zoom: 1.6,
-      pitch: 35,          // gentler tilt keeps globe near middle
+      pitch: 35,
       bearing: 0,
       projection: 'globe',
       cooperativeGestures: true
@@ -107,8 +166,6 @@
     let activeContinentKey = 'world';
     let selectedCountry = null;
     let hoveredId = null;
-
-    // ▼ NEW: keep list of countries -> continent for dropdown filtering
     const countryToContinent = new Map();
 
     document.getElementById('controls').addEventListener('click', (e) => {
@@ -117,6 +174,7 @@
       const key = pill.getAttribute('data-continent');
       if (!key || !CONTINENTS[key]) return;
       flyToContinent(key);
+      resetIdleTimer("pill");
     });
 
     function flyToContinent(key) {
@@ -124,18 +182,14 @@
       activeContinentKey = key;
       document.getElementById('sel-continent').textContent = c.name;
       map.flyTo({ center: c.center, zoom: c.zoom, essential: true, pitch: 35, bearing: 0 });
-      applyActivePill();
-      selectedCountry = null;
-      document.getElementById('sel-country').textContent = '—';
-      document.getElementById('continueBtn').disabled = true;
-      filterCountriesByContinent();     // ▼ NEW
-      filterDropdownByContinent();      // ▼ NEW
-    }
-
-    function applyActivePill() {
       document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
       const active = document.querySelector(`.pill[data-continent="${activeContinentKey}"]`);
       if (active) active.classList.add('active');
+      selectedCountry = null;
+      document.getElementById('sel-country').textContent = '—';
+      document.getElementById('continueBtn').disabled = true;
+      filterCountriesByContinent();
+      filterDropdownByContinent();
     }
 
     const WORLD_GEOJSON_URL = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
@@ -154,15 +208,13 @@
         f.properties._continent = inferContinent(centroid);
         countryToContinent.set(name, f.properties._continent);
 
-        // ▼ NEW: enlarge tiny countries (e.g., Singapore) so they're tappable
         const area = turf.area(f);
-        if (area < 5e8) { // ~500 km²
+        if (area < 5e8) {
           const buffered = turf.buffer(turf.point(centroid), 0.5, { units: 'degrees' });
           f.geometry = buffered.geometry;
         }
       });
 
-      // ▼ NEW: populate dropdown initially (all countries, A→Z)
       populateDropdown(Array.from(countryToContinent.keys()));
 
       map.addSource('countries', { type: 'geojson', data: world, generateId: true });
@@ -206,7 +258,6 @@
         selectedCountry = name;
         document.getElementById('sel-country').textContent = name;
 
-        // ▼ NEW: sync UI + enable continue
         document.getElementById('countrySelect').value = name;
         document.getElementById('countryInput').value = "";
         updateContinueState();
@@ -217,9 +268,12 @@
           pitch: 35,
           maxZoom: 7
         });
+
+        resetIdleTimer("map");
       });
 
       flyToContinent('world');
+      resetIdleTimer();
     });
 
     function inferContinent([lng, lat]) {
@@ -239,7 +293,6 @@
       return 'world';
     }
 
-    // ▼ NEW: filter layers by active continent
     function filterCountriesByContinent() {
       if (!map.getSource('countries')) return;
       if (activeContinentKey === 'world') {
@@ -252,10 +305,8 @@
       }
     }
 
-    // ▼ NEW: populate and filter the dropdown
     function populateDropdown(names) {
       const sel = document.getElementById('countrySelect');
-      // clear previous dynamic options
       Array.from(sel.querySelectorAll('option[data-cty]')).forEach(o => o.remove());
       names.sort((a,b)=>a.localeCompare(b));
       for (const name of names) {
@@ -273,7 +324,6 @@
       document.getElementById('countrySelect').value = "";
     }
 
-    // ▼ NEW: helpers for dropdown/text → enable Continue & show country line
     function updateContinueState() {
       const typed = document.getElementById('countryInput').value.trim();
       const picked = document.getElementById('countrySelect').value.trim();
@@ -282,38 +332,51 @@
       const display = selectedCountry || picked || (typed ? typed : '—');
       document.getElementById('sel-country').textContent = display;
     }
+
     document.getElementById('countrySelect').addEventListener('change', () => {
       selectedCountry = document.getElementById('countrySelect').value || null;
       document.getElementById('countryInput').value = "";
       updateContinueState();
+      resetIdleTimer("dropdown");
     });
+
     document.getElementById('countryInput').addEventListener('input', () => {
       selectedCountry = null;
       document.getElementById('countrySelect').value = "";
       updateContinueState();
+      resetIdleTimer("typed");
     });
 
-    document.getElementById('continueBtn').addEventListener('click', () => {
-      // ▼ UPDATED: prefer typed → dropdown → map click
-      let country = document.getElementById('countryInput').value.trim()
-                || document.getElementById('countrySelect').value.trim()
-                || selectedCountry;
+    document.getElementById('continueBtn').addEventListener('click', async () => {
+      // Build selection
+      const typed = document.getElementById('countryInput').value.trim();
+      const picked = document.getElementById('countrySelect').value.trim();
+      const country = typed || picked || selectedCountry;
       if (!country) return;
 
-      // derive continent either from active pill or the map’s index
       let contKey = activeContinentKey;
       if (countryToContinent.has(country)) contKey = countryToContinent.get(country);
       const continent = CONTINENTS[contKey]?.name || 'World';
 
-      if (TYPEFORM_BASE_URL) {
-        const params = new URLSearchParams();
-        params.set(HIDDEN_FIELD_NAMES.country, country);
-        params.set(HIDDEN_FIELD_NAMES.continent, continent);
-        const url = TYPEFORM_BASE_URL + (TYPEFORM_BASE_URL.includes('?') ? '&' : '?') + params.toString();
-        window.location.href = url;
-      } else {
-        alert(`Selected: ${country} (${continent}). Set TYPEFORM_BASE_URL to auto-redirect.`);
-      }
+      // 1) Log to Excel (event=continue)
+      logToExcel({
+        timestamp: new Date().toISOString(),
+        event: "continue",
+        continentKey: contKey,
+        continent,
+        country,
+        inputMethod: selectedCountry ? "map" : (picked ? "dropdown" : "typed"),
+        sessionId,
+        userAgent: navigator.userAgent || "",
+        referrer: document.referrer || ""
+      });
+
+      // 2) Redirect to Typeform with hidden fields
+      const params = new URLSearchParams();
+      params.set(HIDDEN_FIELD_NAMES.country, country);
+      params.set(HIDDEN_FIELD_NAMES.continent, continent);
+      const url = TYPEFORM_BASE_URL + (TYPEFORM_BASE_URL.includes('?') ? '&' : '?') + params.toString();
+      window.location.href = url;
     });
 
     window.addEventListener('resize', () => map.resize());
