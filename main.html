@@ -80,7 +80,7 @@
     const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
 
     // Power Automate HTTP trigger URL (writes to SharePoint Excel)
-    const FLOW_URL = ""; // <-- paste your Flow URL
+    const FLOW_URL = "https://default7c20608d4a1b45e8b5533ef51e6a19.60.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/feb482dbaf6b4ea3b8a5692b07c11012/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=rBRW60F-3h2gSPuZwa5QxIadWxUrKwtflcUgRQSyCm0"; // <-- paste your Flow URL
 
     // OPTIONAL: include extra metadata with each log row
     const sessionId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
