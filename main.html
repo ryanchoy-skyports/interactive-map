@@ -13,10 +13,7 @@
     .pill { display: inline-block; padding: 8px 14px; border-radius: 999px; border: 1px solid #ddd; cursor: pointer; font-size: 14px; background: #fff; }
     .pill:hover { background: #f6f6f6; }
     .pill.active { background: #111; color: #fff; border-color: #111; }
-
-    /* Map area */
     #map { width: 100%; height: calc(100vh - 92px); min-height: 420px; }
-
     .sidebar { position: absolute; left: 12px; top: 70px; z-index: 5; background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.08); max-width: 300px; }
     .sidebar h3 { margin: 0 0 6px 0; font-size: 14px; }
     .sidebar .row { font-size: 13px; margin-top: 6px; }
@@ -24,22 +21,17 @@
     .sidebar button:disabled { opacity: 0.5; cursor: not-allowed; }
     .sidebar input, .sidebar select { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 10px; font-size: 13px; background: #fff; }
     .footer { padding: 8px 14px; border-top: 1px solid #eee; font-size: 12px; color: #666; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-
-    /* Typeform overlay */
     .tf-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: none; align-items: center; justify-content: center; z-index: 50; }
     .tf-overlay.show { display: flex; }
     .tf-card { width: min(900px,96vw); height: min(700px,92vh); background:#fff; border-radius:16px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,.25); position:relative; }
     .tf-close { position:absolute; top:8px; right:10px; border:0; background:transparent; font-size:22px; cursor:pointer; line-height:1; }
     #tf-container { width:100%; height:100%; }
   </style>
-
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
-
-  <!-- IMPORTANT: load Typeform's official global SDK BEFORE our module -->
-  <script src="https://embed.typeform.com/next/embed.js"></script>
 </head>
+
 <body>
   <div id="app">
     <header>
@@ -63,19 +55,16 @@
         <h3>Selection</h3>
         <div class="row">Continent: <strong id="sel-continent">—</strong></div>
         <div class="row">Country: <strong id="sel-country">—</strong></div>
-
         <div class="row" style="margin-top:10px;">
           <label style="font-size:12px;color:#334155;">If you can’t click your country, pick from list:</label>
           <select id="countrySelect">
             <option value="">— Select country —</option>
           </select>
         </div>
-
         <div class="row">
           <label style="font-size:12px;color:#334155;">Or type it:</label>
           <input type="text" id="countryInput" placeholder="Start typing your country…" />
         </div>
-
         <button id="continueBtn" disabled>Continue</button>
         <div class="row" style="margin-top:6px;font-size:12px;color:#666;">2 more survey questions :)</div>
       </div>
@@ -85,7 +74,6 @@
       <span>Drag to rotate globe • Pinch/scroll to zoom • Two-finger drag to tilt.</span>
     </div>
 
-    <!-- Typeform modal overlay -->
     <div id="tf-overlay" class="tf-overlay" aria-hidden="true">
       <div class="tf-card">
         <button class="tf-close" id="tf-close" aria-label="Close">✕</button>
@@ -94,80 +82,99 @@
     </div>
   </div>
 
-  <!-- All logic -->
   <script type="module">
-    // --- Helpers to ensure Typeform global is ready ---
-    function ensureTypeform(timeoutMs = 5000) {
-      return new Promise((resolve, reject) => {
-        const start = Date.now();
-        (function check() {
-          const cw = window?.typeformEmbed?.createWidget;
-          if (typeof cw === "function") return resolve(cw);
-          if (Date.now() - start > timeoutMs) return reject(new Error("Typeform embed failed to load"));
-          setTimeout(check, 50);
-        })();
-      });
-    }
-
-    // Mapbox token
+    /******** CONFIG ********/
     mapboxgl.accessToken = "pk.eyJ1IjoiaGFubmFoLXNreXBvcnRzIiwiYSI6ImNtaGFnMGc3NzBwMzEya3NoeTd2MHNwdmgifQ.u8MJSsxYzPLesSUPT63C1w";
-
-    // Typeform config
     const TYPEFORM_BASE_URL = "https://form.typeform.com/to/arBzBlTZ";
     const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
+    const FLOW_URL = ""; // optional Power Automate endpoint for Excel logging
 
-    // Typeform overlay & 30s inactivity
-    const TF_TIMEOUT_MS = 30000;
+    /******** Typeform Loader ********/
+    async function loadTypeformScript() {
+      if (window?.typeformEmbed?.createWidget) return window.typeformEmbed.createWidget;
+      const existing = [...document.scripts].find(s => s.src.includes("embed.typeform.com/next/embed.js"));
+      if (existing) {
+        await new Promise((res, rej) => {
+          existing.addEventListener("load", res, { once: true });
+          existing.addEventListener("error", () => rej(new Error("Typeform script failed")), { once: true });
+          setTimeout(() => window?.typeformEmbed?.createWidget ? res() : rej(new Error("Timeout")), 8000);
+        });
+        return window.typeformEmbed.createWidget;
+      }
+      await new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://embed.typeform.com/next/embed.js";
+        s.async = true;
+        s.onload = res;
+        s.onerror = () => rej(new Error("Typeform script failed"));
+        document.head.appendChild(s);
+        setTimeout(() => window?.typeformEmbed?.createWidget ? res() : rej(new Error("Timeout")), 8000);
+      });
+      return window.typeformEmbed.createWidget;
+    }
+
+    /******** Excel Logger ********/
+    async function logToExcel({ country, continent }) {
+      if (!FLOW_URL) return;
+      try {
+        await fetch(FLOW_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            timestamp: new Date().toISOString(),
+            country,
+            continent,
+            source: "map",
+            userAgent: navigator.userAgent,
+            referrer: document.referrer
+          }),
+          keepalive: true
+        });
+      } catch (_) {}
+    }
+
+    /******** Typeform Modal ********/
     const tfOverlay = document.getElementById('tf-overlay');
     const tfContainer = document.getElementById('tf-container');
     const tfCloseBtn = document.getElementById('tf-close');
     let tfTimer = null;
-
-    async function openTypeform({ country, continent }) {
-      const url = new URL(TYPEFORM_BASE_URL);
-      url.searchParams.set(HIDDEN_FIELD_NAMES.country, country);
-      url.searchParams.set(HIDDEN_FIELD_NAMES.continent, continent);
-
-      tfContainer.innerHTML = "";
-
-      let createWidget;
-      try {
-        createWidget = await ensureTypeform();
-      } catch (e) {
-        console.error(e);
-        alert("Typeform embed didn't load. Please check your network and try again.");
-        return;
-      }
-
-      createWidget(url.toString(), {
-        container: tfContainer,
-        onReady: resetTfIdleTimer,
-        onQuestionChanged: resetTfIdleTimer,
-        onHeightChanged: resetTfIdleTimer
-      });
-
-      tfOverlay.classList.add('show');
-      tfOverlay.setAttribute('aria-hidden', 'false');
-      resetTfIdleTimer();
-    }
-
-    function closeTypeform() {
-      clearTimeout(tfTimer);
-      tfTimer = null;
-      tfOverlay.classList.remove('show');
-      tfOverlay.setAttribute('aria-hidden', 'true');
-      tfContainer.innerHTML = "";
-    }
+    const TF_TIMEOUT_MS = 30000;
 
     function resetTfIdleTimer() {
       clearTimeout(tfTimer);
       tfTimer = setTimeout(closeTypeform, TF_TIMEOUT_MS);
     }
-
+    function closeTypeform() {
+      clearTimeout(tfTimer);
+      tfOverlay.classList.remove('show');
+      tfOverlay.setAttribute('aria-hidden', 'true');
+      tfContainer.innerHTML = "";
+    }
+    async function openTypeform({ country, continent }) {
+      const url = new URL(TYPEFORM_BASE_URL);
+      url.searchParams.set(HIDDEN_FIELD_NAMES.country, country);
+      url.searchParams.set(HIDDEN_FIELD_NAMES.continent, continent);
+      tfContainer.innerHTML = "";
+      try {
+        const createWidget = await loadTypeformScript();
+        createWidget(url.toString(), {
+          container: tfContainer,
+          onReady: resetTfIdleTimer,
+          onQuestionChanged: resetTfIdleTimer,
+          onHeightChanged: resetTfIdleTimer
+        });
+        tfOverlay.classList.add("show");
+        tfOverlay.setAttribute("aria-hidden", "false");
+        resetTfIdleTimer();
+      } catch (e) {
+        console.error(e);
+        window.open(url.toString(), "_blank", "noopener,noreferrer");
+      }
+    }
     tfCloseBtn.addEventListener('click', closeTypeform);
-    tfOverlay.addEventListener('click', (e) => { if (e.target === tfOverlay) closeTypeform(); });
+    tfOverlay.addEventListener('click', e => { if (e.target === e.currentTarget) closeTypeform(); });
 
-    // --- Map setup ---
+    /******** Mapbox Setup ********/
     const map = new mapboxgl.Map({
       container: 'map',
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
@@ -175,13 +182,9 @@
       zoom: 1.6,
       pitch: 35,
       bearing: 0,
-      projection: 'globe',
-      cooperativeGestures: true
+      projection: 'globe'
     });
-
-    map.on('style.load', () => { try { map.setFog({}); } catch (_) {} map.resize(); });
-    map.once('load', () => map.resize());
-    window.addEventListener('load', () => map.resize());
+    map.on('style.load', () => map.setFog({}));
     map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'top-right');
 
     const CONTINENTS = {
@@ -194,16 +197,13 @@
       antarctica: { name: "Antarctica", center: [0, -70], zoom: 1.6 },
       world: { name: "World", center: [0, 30], zoom: 1.5 }
     };
-
-    let activeContinentKey = 'world';
-    let selectedCountry = null;
-    let hoveredId = null;
+    let activeContinentKey = 'world', selectedCountry = null, hoveredId = null;
     const countryToContinent = new Map();
 
-    document.getElementById('controls').addEventListener('click', (e) => {
+    document.getElementById('controls').addEventListener('click', e => {
       const pill = e.target.closest('.pill');
       if (!pill) return;
-      const key = pill.getAttribute('data-continent');
+      const key = pill.dataset.continent;
       if (!key || !CONTINENTS[key]) return;
       flyToContinent(key);
     });
@@ -214,8 +214,7 @@
       document.getElementById('sel-continent').textContent = c.name;
       map.flyTo({ center: c.center, zoom: c.zoom, essential: true, pitch: 35, bearing: 0 });
       document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
-      const active = document.querySelector(`.pill[data-continent="${activeContinentKey}"]`);
-      if (active) active.classList.add('active');
+      document.querySelector(`.pill[data-continent="${key}"]`)?.classList.add('active');
       selectedCountry = null;
       document.getElementById('sel-country').textContent = '—';
       document.getElementById('continueBtn').disabled = true;
@@ -224,11 +223,9 @@
     }
 
     const WORLD_GEOJSON_URL = "https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json";
-
     map.on('load', async () => {
       const res = await fetch(WORLD_GEOJSON_URL);
       const world = await res.json();
-
       world.features.forEach(f => {
         const name = f.properties.name || f.properties.ADMIN || "Unknown";
         const centroid = turf.centroid(f).geometry.coordinates;
@@ -237,29 +234,11 @@
         f.properties._continent = inferContinent(centroid);
         countryToContinent.set(name, f.properties._continent);
       });
-
       populateDropdown(Array.from(countryToContinent.keys()));
-
       map.addSource('countries', { type: 'geojson', data: world, generateId: true });
-
-      map.addLayer({
-        id: 'countries-fill',
-        type: 'fill',
-        source: 'countries',
-        paint: {
-          'fill-color': '#9ec5fe',
-          'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.75, 0.45]
-        }
-      });
-
-      map.addLayer({
-        id: 'countries-outline',
-        type: 'line',
-        source: 'countries',
-        paint: { 'line-color': '#4b5563', 'line-width': 0.6 }
-      });
-
-      map.on('mousemove', 'countries-fill', (e) => {
+      map.addLayer({ id: 'countries-fill', type: 'fill', source: 'countries', paint: { 'fill-color': '#9ec5fe', 'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.75, 0.45] } });
+      map.addLayer({ id: 'countries-outline', type: 'line', source: 'countries', paint: { 'line-color': '#4b5563', 'line-width': 0.6 } });
+      map.on('mousemove', 'countries-fill', e => {
         map.getCanvas().style.cursor = 'pointer';
         if (!e.features.length) return;
         const fid = e.features[0].id;
@@ -267,48 +246,35 @@
         hoveredId = fid;
         map.setFeatureState({ source: 'countries', id: hoveredId }, { hover: true });
       });
-
       map.on('mouseleave', 'countries-fill', () => {
         map.getCanvas().style.cursor = '';
         if (hoveredId !== null) map.setFeatureState({ source: 'countries', id: hoveredId }, { hover: false });
         hoveredId = null;
       });
-
-      map.on('click', 'countries-fill', (e) => {
+      map.on('click', 'countries-fill', e => {
         if (!e.features.length) return;
         const f = e.features[0];
-        const name = f.properties._name || f.properties.name;
-        selectedCountry = name;
-        document.getElementById('sel-country').textContent = name;
-        document.getElementById('countrySelect').value = name;
+        selectedCountry = f.properties._name;
+        document.getElementById('sel-country').textContent = selectedCountry;
+        document.getElementById('countrySelect').value = selectedCountry;
         document.getElementById('countryInput').value = "";
         updateContinueState();
-
-        const bbox = turf.bbox(f);
-        map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], {
-          padding: { top: 200, bottom: 120, left: 60, right: 60 },
-          pitch: 35,
-          maxZoom: 7
-        });
       });
-
       flyToContinent('world');
     });
 
     function inferContinent([lng, lat]) {
       const boxes = {
         africa: [[-35, -20], [38, 52]],
-        asia: [[-10, 25], [80, 180]],
-        europe: [[35, -25], [72, 45]],
-        na: [[7, -168], [83, -52]],
-        sa: [[-56, -82], [13, -34]],
-        oceania: [[-50, 110], [0, 180]],
-        antarctica: [[-90, -180], [-60, 180]]
+        asia: [[-10, 25], [180, 80]],
+        europe: [[-25, 35], [45, 72]],
+        na: [[-168, 7], [-52, 83]],
+        sa: [[-82, -56], [-34, 13]],
+        oceania: [[110, -50], [180, 0]],
+        antarctica: [[-180, -90], [180, -60]]
       };
-      for (const [k, b] of Object.entries(boxes)) {
-        const [[sLat, sLng], [nLat, nLng]] = b;
-        if (lat >= sLat && lat <= nLat && lng >= sLng && lng <= nLng) return k;
-      }
+      for (const [k, [[minLng, minLat], [maxLng, maxLat]]] of Object.entries(boxes))
+        if (lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat) return k;
       return 'world';
     }
 
@@ -326,13 +292,14 @@
 
     function populateDropdown(names) {
       const sel = document.getElementById('countrySelect');
-      Array.from(sel.querySelectorAll('option[data-cty]')).forEach(o => o.remove());
-      names.sort((a,b)=>a.localeCompare(b));
-      for (const name of names) {
+      sel.querySelectorAll('option[data-cty]').forEach(o => o.remove());
+      names.sort((a, b) => a.localeCompare(b)).forEach(name => {
         const opt = document.createElement('option');
-        opt.value = name; opt.textContent = name; opt.setAttribute('data-cty','1');
+        opt.value = name;
+        opt.textContent = name;
+        opt.setAttribute('data-cty', '1');
         sel.appendChild(opt);
-      }
+      });
     }
 
     function filterDropdownByContinent() {
@@ -349,32 +316,4 @@
       const picked = document.getElementById('countrySelect').value.trim();
       const ok = !!selectedCountry || !!picked || !!typed;
       document.getElementById('continueBtn').disabled = !ok;
-      const display = selectedCountry || picked || (typed ? typed : '—');
-      document.getElementById('sel-country').textContent = display;
-    }
-
-    document.getElementById('countrySelect').addEventListener('change', () => {
-      selectedCountry = document.getElementById('countrySelect').value || null;
-      document.getElementById('countryInput').value = "";
-      updateContinueState();
-    });
-
-    document.getElementById('countryInput').addEventListener('input', () => {
-      selectedCountry = null;
-      document.getElementById('countrySelect').value = "";
-      updateContinueState();
-    });
-
-    document.getElementById('continueBtn').addEventListener('click', () => {
-      let country = document.getElementById('countryInput').value.trim()
-                || document.getElementById('countrySelect').value.trim()
-                || selectedCountry;
-      if (!country) return;
-      let contKey = activeContinentKey;
-      if (countryToContinent.has(country)) contKey = countryToContinent.get(country);
-      const continent = CONTINENTS[contKey]?.name || 'World';
-      openTypeform({ country, continent });
-    });
-  </script>
-</body>
-</html>
+      const display
