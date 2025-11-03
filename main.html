@@ -14,6 +14,7 @@
     .pill:hover { background: #f6f6f6; }
     .pill.active { background: #111; color: #fff; border-color: #111; }
 
+    /* Map area */
     #map { width: 100%; height: calc(100vh - 92px); min-height: 420px; }
 
     .sidebar { position: absolute; left: 12px; top: 70px; z-index: 5; background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 12px; padding: 10px 12px; box-shadow: 0 10px 24px rgba(0,0,0,0.08); max-width: 300px; }
@@ -35,6 +36,9 @@
   <link href="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.css" rel="stylesheet" />
   <script src="https://api.mapbox.com/mapbox-gl-js/v3.6.0/mapbox-gl.js"></script>
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+  <!-- IMPORTANT: load Typeform's official global SDK BEFORE our module -->
+  <script src="https://embed.typeform.com/next/embed.js"></script>
 </head>
 <body>
   <div id="app">
@@ -90,11 +94,20 @@
     </div>
   </div>
 
-  <!-- All logic (Mapbox + Typeform) -->
+  <!-- All logic -->
   <script type="module">
-    // Import Typeform ESM build (bundled) — reliable on GitHub Pages
-    import * as typeformEmbed from "https://esm.sh/@typeform/embed@2?bundle";
-    const { createWidget } = typeformEmbed;
+    // --- Helpers to ensure Typeform global is ready ---
+    function ensureTypeform(timeoutMs = 5000) {
+      return new Promise((resolve, reject) => {
+        const start = Date.now();
+        (function check() {
+          const cw = window?.typeformEmbed?.createWidget;
+          if (typeof cw === "function") return resolve(cw);
+          if (Date.now() - start > timeoutMs) return reject(new Error("Typeform embed failed to load"));
+          setTimeout(check, 50);
+        })();
+      });
+    }
 
     // Mapbox token
     mapboxgl.accessToken = "pk.eyJ1IjoiaGFubmFoLXNreXBvcnRzIiwiYSI6ImNtaGFnMGc3NzBwMzEya3NoeTd2MHNwdmgifQ.u8MJSsxYzPLesSUPT63C1w";
@@ -103,19 +116,29 @@
     const TYPEFORM_BASE_URL = "https://form.typeform.com/to/arBzBlTZ";
     const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
 
-    /* ==== Typeform overlay & 30s inactivity ==== */
+    // Typeform overlay & 30s inactivity
     const TF_TIMEOUT_MS = 30000;
     const tfOverlay = document.getElementById('tf-overlay');
     const tfContainer = document.getElementById('tf-container');
     const tfCloseBtn = document.getElementById('tf-close');
     let tfTimer = null;
 
-    function openTypeform({ country, continent }) {
+    async function openTypeform({ country, continent }) {
       const url = new URL(TYPEFORM_BASE_URL);
       url.searchParams.set(HIDDEN_FIELD_NAMES.country, country);
       url.searchParams.set(HIDDEN_FIELD_NAMES.continent, continent);
 
       tfContainer.innerHTML = "";
+
+      let createWidget;
+      try {
+        createWidget = await ensureTypeform();
+      } catch (e) {
+        console.error(e);
+        alert("Typeform embed didn't load. Please check your network and try again.");
+        return;
+      }
+
       createWidget(url.toString(), {
         container: tfContainer,
         onReady: resetTfIdleTimer,
@@ -144,7 +167,7 @@
     tfCloseBtn.addEventListener('click', closeTypeform);
     tfOverlay.addEventListener('click', (e) => { if (e.target === tfOverlay) closeTypeform(); });
 
-    /* ==== Map setup ==== */
+    // --- Map setup ---
     const map = new mapboxgl.Map({
       container: 'map',
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
