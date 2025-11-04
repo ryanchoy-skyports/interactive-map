@@ -1,1 +1,1 @@
-Use test.html
+https://ryanchoy-skyports.github.io/interactive-map/main.html
