@@ -80,13 +80,13 @@
     const HIDDEN_FIELD_NAMES = { country: "country", continent: "continent" };
 
     // Power Automate HTTP trigger URL (writes to SharePoint Excel)
-    const FLOW_URL = "https://default7c20608d4a1b45e8b5533ef51e6a19.60.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/feb482dbaf6b4ea3b8a5692b07c11012/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=rBRW60F-3h2gSPuZwa5QxIadWxUrKwtflcUgRQSyCm0"; // <-- paste your Flow URL
+    const FLOW_URL = "https://default7c20608d4a1b45e8b5533ef51e6a19.60.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/feb482dbaf6b4ea3b8a5692b07c11012/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=rBRW60F-3h2gSPuZwa5QxIadWxUrKwtflcUgRQSyCm0";
 
-    // OPTIONAL: include extra metadata with each log row
+    // session id for analytics
     const sessionId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
 
     async function logToExcel(payload) {
-      if (!FLOW_URL) return; // no-op until configured
+      if (!FLOW_URL) return;
       try {
         await fetch(FLOW_URL, {
           method: "POST",
@@ -94,49 +94,7 @@
           body: JSON.stringify(payload),
           keepalive: true
         });
-      } catch (e) {
-        // silent fail (don’t break UX)
-      }
-    }
-
-    function currentSelection() {
-      const continent = document.getElementById('sel-continent').textContent.trim();
-      const countryLine = document.getElementById('sel-country').textContent.trim();
-      const country = (countryLine && countryLine !== '—') ? countryLine : (
-        document.getElementById('countryInput').value.trim() ||
-        document.getElementById('countrySelect').value.trim() || ""
-      );
-      const continentKey = activeContinentKey || 'world';
-      return { continent, continentKey, country };
-    }
-
-    function buildLog(event, inputMethod) {
-      const { continent, continentKey, country } = currentSelection();
-      return {
-        timestamp: new Date().toISOString(),
-        event,                 // "continue" | "timeout"
-        continentKey,
-        continent: continent === '—' ? '' : continent,
-        country,
-        inputMethod: inputMethod || "",
-        sessionId,
-        userAgent: navigator.userAgent || "",
-        referrer: document.referrer || ""
-      };
-    }
-
-    /******** 30s inactivity timer ********/
-    const IDLE_MS = 30000;
-    let idleTimer = null;
-    function resetIdleTimer(inputMethod) {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        const { continent, country } = currentSelection();
-        // Only log if *something* is selected/typed
-        if ((continent && continent !== '—') || country) {
-          logToExcel(buildLog("timeout", inputMethod || ""));
-        }
-      }, IDLE_MS);
+      } catch (_) {}
     }
 
     /******** Map + UI ********/
@@ -174,7 +132,7 @@
       const key = pill.getAttribute('data-continent');
       if (!key || !CONTINENTS[key]) return;
       flyToContinent(key);
-      resetIdleTimer("pill");
+      armIdleTimer('pill');
     });
 
     function flyToContinent(key) {
@@ -269,11 +227,11 @@
           maxZoom: 7
         });
 
-        resetIdleTimer("map");
+        armIdleTimer('map');
       });
 
       flyToContinent('world');
-      resetIdleTimer();
+      armIdleTimer('load');
     });
 
     function inferContinent([lng, lat]) {
@@ -337,41 +295,96 @@
       selectedCountry = document.getElementById('countrySelect').value || null;
       document.getElementById('countryInput').value = "";
       updateContinueState();
-      resetIdleTimer("dropdown");
+      armIdleTimer('dropdown');
     });
 
     document.getElementById('countryInput').addEventListener('input', () => {
       selectedCountry = null;
       document.getElementById('countrySelect').value = "";
       updateContinueState();
-      resetIdleTimer("typed");
+      armIdleTimer('typed');
     });
 
+    /******** Single inactivity timer (only if a country is selected) ********/
+    let idleHandle = null;
+    let hasSubmitted = false;
+    const IDLE_MS = 30000;
+
+    function getCurrentCountry() {
+      return (
+        (typeof selectedCountry === 'string' && selectedCountry) ||
+        document.getElementById('countrySelect')?.value?.trim() ||
+        document.getElementById('countryInput')?.value?.trim() ||
+        ''
+      );
+    }
+    function resolveContinentForCountry(country) {
+      if (countryToContinent && countryToContinent.has(country)) {
+        const key = countryToContinent.get(country);
+        return { key, name: CONTINENTS[key]?.name || 'World' };
+      }
+      return { key: activeContinentKey || 'world', name: CONTINENTS[activeContinentKey]?.name || 'World' };
+    }
+    function armIdleTimer(source) {
+      clearTimeout(idleHandle);
+      if (hasSubmitted) return;
+      idleHandle = setTimeout(async () => {
+        if (hasSubmitted) return;
+        const country = getCurrentCountry();
+        if (!country) return; // no country -> do nothing
+
+        const { key: contKey, name: continent } = resolveContinentForCountry(country);
+
+        try {
+          await logToExcel({
+            timestamp: new Date().toISOString(),
+            event: "timeout",
+            continentKey: contKey,
+            continent,
+            country,
+            inputMethod: source || "",
+            sessionId,
+            userAgent: navigator.userAgent || "",
+            referrer: document.referrer || ""
+          });
+        } catch (_) {}
+
+        hasSubmitted = true;
+        window.location.reload();
+      }, IDLE_MS);
+    }
+    ['mousemove','mousedown','keypress','scroll','touchstart'].forEach(evt =>
+      window.addEventListener(evt, () => armIdleTimer('activity'))
+    );
+
+    // Continue: cancel idle, log, redirect
     document.getElementById('continueBtn').addEventListener('click', async () => {
-      // Build selection
-      const typed = document.getElementById('countryInput').value.trim();
+      if (hasSubmitted) return;
+
+      const typed  = document.getElementById('countryInput').value.trim();
       const picked = document.getElementById('countrySelect').value.trim();
       const country = typed || picked || selectedCountry;
       if (!country) return;
 
-      let contKey = activeContinentKey;
-      if (countryToContinent.has(country)) contKey = countryToContinent.get(country);
-      const continent = CONTINENTS[contKey]?.name || 'World';
+      hasSubmitted = true;
+      clearTimeout(idleHandle);
 
-      // 1) Log to Excel (event=continue)
-      logToExcel({
-        timestamp: new Date().toISOString(),
-        event: "continue",
-        continentKey: contKey,
-        continent,
-        country,
-        inputMethod: selectedCountry ? "map" : (picked ? "dropdown" : "typed"),
-        sessionId,
-        userAgent: navigator.userAgent || "",
-        referrer: document.referrer || ""
-      });
+      const { key: contKey, name: continent } = resolveContinentForCountry(country);
 
-      // 2) Redirect to Typeform with hidden fields
+      try {
+        await logToExcel({
+          timestamp: new Date().toISOString(),
+          event: "continue",
+          continentKey: contKey,
+          continent,
+          country,
+          inputMethod: selectedCountry ? "map" : (picked ? "dropdown" : "typed"),
+          sessionId,
+          userAgent: navigator.userAgent || "",
+          referrer: document.referrer || ""
+        });
+      } catch (_) {}
+
       const params = new URLSearchParams();
       params.set(HIDDEN_FIELD_NAMES.country, country);
       params.set(HIDDEN_FIELD_NAMES.continent, continent);
@@ -380,66 +393,6 @@
     });
 
     window.addEventListener('resize', () => map.resize());
-
-    // ================================
-  // Inactivity Timeout + Auto Refresh
-  // ================================
-  let inactivityTimer = null;
-  const INACTIVITY_LIMIT_MS = 30000; // 30 seconds
-
-  function resetInactivityTimer() {
-    clearTimeout(inactivityTimer);
-    inactivityTimer = setTimeout(() => {
-      handleInactivityTimeout();
-    }, INACTIVITY_LIMIT_MS);
-  }
-
-  ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
-    window.addEventListener(evt, resetInactivityTimer);
-  });
-
-  async function handleInactivityTimeout() {
-    console.log('🕒 Inactive for 30s — sending partial data + refreshing...');
-
-    const payload = {
-      timestamp: new Date().toISOString(),
-      event: "timeout",
-      continentKey: activeContinentKey || "",
-      continent: CONTINENTS[activeContinentKey]?.name || "",
-      country:
-        selectedCountry ||
-        document.getElementById("countrySelect").value ||
-        document.getElementById("countryInput").value ||
-        "",
-      inputMethod: selectedCountry
-        ? "map"
-        : document.getElementById("countrySelect").value
-        ? "dropdown"
-        : "typed",
-      sessionId:
-        localStorage.getItem("sessionId") ||
-        Math.random().toString(36).substring(2),
-      userAgent: navigator.userAgent,
-      referrer: document.referrer
-    };
-
-    try {
-      await fetch(FLOW_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true
-      });
-    } catch (e) {
-      console.error("⚠️ Failed to send partial data:", e);
-    }
-
-    // Refresh page after sending
-    window.location.reload();
-  }
-
-  // Start the timer immediately
-  resetInactivityTimer();
-</script>
+  </script>
 </body>
 </html>
