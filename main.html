@@ -380,6 +380,66 @@
     });
 
     window.addEventListener('resize', () => map.resize());
-  </script>
+
+    // ================================
+  // Inactivity Timeout + Auto Refresh
+  // ================================
+  let inactivityTimer = null;
+  const INACTIVITY_LIMIT_MS = 30000; // 30 seconds
+
+  function resetInactivityTimer() {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(() => {
+      handleInactivityTimeout();
+    }, INACTIVITY_LIMIT_MS);
+  }
+
+  ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
+    window.addEventListener(evt, resetInactivityTimer);
+  });
+
+  async function handleInactivityTimeout() {
+    console.log('🕒 Inactive for 30s — sending partial data + refreshing...');
+
+    const payload = {
+      timestamp: new Date().toISOString(),
+      event: "timeout",
+      continentKey: activeContinentKey || "",
+      continent: CONTINENTS[activeContinentKey]?.name || "",
+      country:
+        selectedCountry ||
+        document.getElementById("countrySelect").value ||
+        document.getElementById("countryInput").value ||
+        "",
+      inputMethod: selectedCountry
+        ? "map"
+        : document.getElementById("countrySelect").value
+        ? "dropdown"
+        : "typed",
+      sessionId:
+        localStorage.getItem("sessionId") ||
+        Math.random().toString(36).substring(2),
+      userAgent: navigator.userAgent,
+      referrer: document.referrer
+    };
+
+    try {
+      await fetch(FLOW_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true
+      });
+    } catch (e) {
+      console.error("⚠️ Failed to send partial data:", e);
+    }
+
+    // Refresh page after sending
+    window.location.reload();
+  }
+
+  // Start the timer immediately
+  resetInactivityTimer();
+</script>
 </body>
 </html>
